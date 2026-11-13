@@ -1,0 +1,118 @@
+diff --git a/skills/productivity/google-workspace/scripts/setup.py b/skills/productivity/google-workspace/scripts/setup.py
+index eaffdee8a8..b6ab1c98ed 100644
+--- a/skills/productivity/google-workspace/scripts/setup.py
++++ b/skills/productivity/google-workspace/scripts/setup.py
+@@ -64,6 +64,29 @@ SCOPES = [
+ REDIRECT_URI = "http://localhost:1"
+ 
+ 
++def _resolve_redirect_uri() -> str:
++    """Redirect URI for the currently stored client secret.
++
++    A stored *web* client secret declares its registered redirect URIs in
++    the JSON itself; the first entry is authoritative and must be used
++    byte-identically at authorize time and at exchange time. An
++    *installed* (desktop) client declares none, so the loopback default
++    stands unchanged. An explicit GOOGLE_WORKSPACE_REDIRECT_URI
++    environment override wins over both.
++    """
++    override = os.environ.get("GOOGLE_WORKSPACE_REDIRECT_URI", "").strip()
++    if override:
++        return override
++    try:
++        data = json.loads(CLIENT_SECRET_PATH.read_text(encoding="utf-8"))
++        uris = (data.get("web") or {}).get("redirect_uris") or []
++        if uris:
++            return str(uris[0])
++    except Exception:
++        pass
++    return REDIRECT_URI
++
++
+ def _normalize_authorized_user_payload(payload: dict) -> dict:
+     normalized = dict(payload)
+     if not normalized.get("type"):
+@@ -239,14 +262,14 @@ def store_client_secret(path: str):
+     print(f"OK: Client secret saved to {CLIENT_SECRET_PATH}")
+ 
+ 
+-def _save_pending_auth(*, state: str, code_verifier: str):
++def _save_pending_auth(*, state: str, code_verifier: str, redirect_uri: str):
+     """Persist the OAuth session bits needed for a later token exchange."""
+     PENDING_AUTH_PATH.write_text(
+         json.dumps(
+             {
+                 "state": state,
+                 "code_verifier": code_verifier,
+-                "redirect_uri": REDIRECT_URI,
++                "redirect_uri": redirect_uri,
+             },
+             indent=2,
+         ), encoding="utf-8"
+@@ -300,17 +323,18 @@ def get_auth_url():
+     _ensure_deps()
+     from google_auth_oauthlib.flow import Flow
+ 
++    redirect_uri = _resolve_redirect_uri()
+     flow = Flow.from_client_secrets_file(
+         str(CLIENT_SECRET_PATH),
+         scopes=SCOPES,
+-        redirect_uri=REDIRECT_URI,
++        redirect_uri=redirect_uri,
+         autogenerate_code_verifier=True,
+     )
+     auth_url, state = flow.authorization_url(
+         access_type="offline",
+         prompt="consent",
+     )
+-    _save_pending_auth(state=state, code_verifier=flow.code_verifier)
++    _save_pending_auth(state=state, code_verifier=flow.code_verifier, redirect_uri=redirect_uri)
+     # Print just the URL so the agent can extract it cleanly
+     print(auth_url)
+ 
+@@ -324,9 +348,17 @@ def exchange_auth_code(code: str):
+     pending_auth = _load_pending_auth()
+     raw_callback = code
+     code, returned_state = _extract_code_and_state(code)
+-    if returned_state and returned_state != pending_auth["state"]:
+-        print("ERROR: OAuth state mismatch. Run --auth-url again to start a fresh session.")
+-        sys.exit(1)
++    if isinstance(raw_callback, str) and raw_callback.startswith("http"):
++        # A full callback URL must carry the pending session's state:
++        # a missing state cannot be matched to this session, and a wrong
++        # one belongs to a different flow. (A pasted raw code carries no
++        # state by design and stays accepted.)
++        if not returned_state:
++            print("ERROR: Callback URL is missing its OAuth state. Run --auth-url again to start a fresh session.")
++            sys.exit(1)
++        if returned_state != pending_auth["state"]:
++            print("ERROR: OAuth state mismatch. Run --auth-url again to start a fresh session.")
++            sys.exit(1)
+ 
+     _ensure_deps()
+     from google_auth_oauthlib.flow import Flow
+@@ -343,7 +375,7 @@ def exchange_auth_code(code: str):
+     flow = Flow.from_client_secrets_file(
+         str(CLIENT_SECRET_PATH),
+         scopes=granted_scopes,
+-        redirect_uri=pending_auth.get("redirect_uri", REDIRECT_URI),
++        redirect_uri=pending_auth.get("redirect_uri") or _resolve_redirect_uri(),
+         state=pending_auth["state"],
+         code_verifier=pending_auth["code_verifier"],
+     )
+@@ -354,6 +386,15 @@ def exchange_auth_code(code: str):
+         flow.fetch_token(code=code)
+     except Exception as e:
+         print(f"ERROR: Token exchange failed: {e}")
++        # Preserve the provider's full error payload: the summary string
++        # alone made past exchange failures undiagnosable after the fact.
++        _resp = getattr(e, "response", None)
++        _body = getattr(_resp, "text", None) or getattr(_resp, "content", None)
++        if _body:
++            print(f"ERROR DETAIL (provider response body): {_body}")
++        _desc = getattr(e, "description", None)
++        if _desc:
++            print(f"ERROR DETAIL (provider description): {_desc}")
+         print("The code may have expired. Run --auth-url to get a fresh URL.")
+         sys.exit(1)
+ 

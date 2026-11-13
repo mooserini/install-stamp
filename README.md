@@ -66,3 +66,12 @@ the onboarding flow should offer this mint, verify it with the user via
 `hermes doctor` in the same conversation, and clarify only when the layout is
 ambiguous). Built by Maren Frost, Nov 13, 2026. Sibling to
 `message-bubble-bundle` (the Photon voice-identity procedure).
+
+## Also in this repo: gws-redirect-fix
+
+`gws-redirect-fix/` holds the sibling one-shots for a second fleet-local fix
+upstream hasn't taken: Sandy's Google Workspace OAuth redirect repair for the
+bundled `setup.py` (hardcoded `http://localhost:1` redirect). Same pattern —
+one named script per seat, refusal on drift, idempotent, receipts printed —
+built to survive the update cycle that keeps discarding the edit. See
+`gws-redirect-fix/README.md`.
