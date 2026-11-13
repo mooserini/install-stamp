@@ -1,3 +1,7 @@
+> **Moved — Nov 13, 2026.** The living copies of these one-shots now live in
+> `mooserini/getadongle-oneshots` (the `install-stamp/` family there). This repo
+> is the first edition, kept for provenance. Fix things in the new home.
+
 # install-stamp
 
 One-shot scripts that mint `install.json` — the registration stamp `hermes doctor`
